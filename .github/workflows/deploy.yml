@@ -1,0 +1,61 @@
+# Pipeline ของร้าน "กินดี": Test → Deploy → Smoke Test
+# ทำงานเองทุกครั้งที่ commit เข้า branch main หรือกด Run workflow ในแท็บ Actions
+name: Test, Deploy, Smoke
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: 1. Test ก่อน deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: node --test tests/menu.test.js
+
+  deploy:
+    name: 2. Deploy ขึ้นเว็บ
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: ใส่เลขเวอร์ชันลงหน้าเว็บ
+        run: sed -i "s/content=\"dev\"/content=\"${GITHUB_SHA}\"/" index.html
+      - name: เตรียมไฟล์เว็บ
+        run: mkdir site && cp index.html menu.js site/
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v5
+
+  smoke:
+    name: 3. Smoke Test หลัง deploy
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: node tests/smoke.js "${{ needs.deploy.outputs.page_url }}" "${GITHUB_SHA}"
